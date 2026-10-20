@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar Ansible e coleções
+        run: |
+          pip install ansible-core -r requirements.txt
+          ansible-galaxy collection install -r requirements.yml
+
+      - name: Testes da verificação (saídas simuladas de Cisco e Huawei)
+        run: ansible-playbook tests/test_avaliar.yml
+
+      - name: Sintaxe do playbook
+        run: |
+          cp playbooks/vars/secrets.example.yml playbooks/vars/secrets.yml
+          ansible-playbook -i inventories/production/inventory_switches.ini playbooks/snmpv3-switches.yml --syntax-check
+
+      - name: Sintaxe dos scripts
+        run: |
+          python -m py_compile playbooks/files/enviar_resumo_email.py
+          bash -n playbooks/files/rodar_snmpv3.sh
