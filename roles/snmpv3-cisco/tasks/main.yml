@@ -1,0 +1,63 @@
+---
+# Verifica antes de mexer: switch que já tem tudo é pulado sem receber nenhum
+# comando de configuração. Só o que estiver fora do padrão recebe a config.
+- name: SNMPv3 e trap (verificar, pular ou aplicar)
+  block:
+    - name: Verificar SNMPv3/trap atual do switch
+      ansible.builtin.include_tasks: verificar.yml
+
+    # O "when" de um block é reavaliado em cada task de dentro. Se o bloco de
+    # aplicação dependesse de snmpv3_conforme, a segunda verificação (que deixa
+    # snmpv3_conforme: true) faria o Ansible pular o assert e o registro final.
+    - name: Guardar a decisão antes de aplicar
+      ansible.builtin.set_fact:
+        snmpv3_precisa_aplicar: "{{ not (snmpv3_conforme | bool) }}"
+        snmpv3_faltando_antes: "{{ snmpv3_faltando }}"
+
+    - name: Switch já conforme, pular
+      ansible.builtin.set_fact:
+        snmpv3_resultado: pulado
+      when: not (snmpv3_precisa_aplicar | bool)
+
+    - name: Modo só verificar, registrar o que falta sem aplicar
+      ansible.builtin.set_fact:
+        snmpv3_resultado: pendente
+      when:
+        - snmpv3_precisa_aplicar | bool
+        - snmpv3_somente_verificar | bool
+
+    - name: Aplicar e conferir (só switch fora do padrão)
+      when:
+        - snmpv3_precisa_aplicar | bool
+        - not (snmpv3_somente_verificar | bool)
+      block:
+        - name: Mostrar o que falta neste switch
+          ansible.builtin.debug:
+            msg: "Faltando: {{ snmpv3_faltando | join(', ') }}"
+
+        - name: Gerar e aplicar configuração SNMPv3 (Cisco IOS/IOS-XE)
+          ansible.netcommon.cli_config:
+            config: "{{ lookup('template', 'cisco_snmpv3.j2') }}"
+          no_log: true   # o template tem as senhas SNMPv3
+
+        - name: Salvar na startup-config (sobrevive a reboot)
+          cisco.ios.ios_config:
+            save_when: modified
+
+        - name: Conferir de novo depois de aplicar
+          ansible.builtin.include_tasks: verificar.yml
+
+        - name: Falhar se ainda faltar algo
+          ansible.builtin.assert:
+            that: snmpv3_conforme | bool
+            fail_msg: "Depois de aplicar ainda falta: {{ snmpv3_faltando | join(', ') }}"
+            quiet: true
+
+        - name: Registrar que este switch recebeu a config
+          ansible.builtin.set_fact:
+            snmpv3_resultado: aplicado
+  rescue:
+    - name: Registrar falha (aparece no resumo do fim)
+      ansible.builtin.set_fact:
+        snmpv3_resultado: falhou
+        snmpv3_erro: "{{ ansible_failed_result.msg | default('erro sem mensagem') }}"

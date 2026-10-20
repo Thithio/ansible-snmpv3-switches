@@ -1,0 +1,3 @@
+# /etc/cron.d/snmpv3-switches
+# Toda segunda-feira às 02:00: confere SNMPv3/trap em todos os switches e aplica onde faltar.
+0 2 * * 1 root /opt/ansible-snmpv3-switches/playbooks/files/rodar_snmpv3.sh production >/dev/null 2>&1

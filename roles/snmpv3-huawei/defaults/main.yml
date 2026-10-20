@@ -1,0 +1,9 @@
+---
+snmpv3_view_name: SNMP-VIEW
+snmpv3_group_name: MONITORAMENTO
+snmpv3_user: ZABBIX
+# VRP recente marca sha/aes128 como fracos e pode recusar.
+huawei_snmpv3_auth_mode: sha2-256
+huawei_snmpv3_priv_mode: aes256
+# Começa só verificando. Depois de validar num switch de teste, troque para false.
+snmpv3_somente_verificar: true

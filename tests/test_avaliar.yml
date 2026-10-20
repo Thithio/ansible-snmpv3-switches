@@ -1,0 +1,78 @@
+---
+# Testa a lógica de verificação das duas roles com saídas simuladas, sem switch.
+# Uso: ansible-playbook tests/test_avaliar.yml
+- name: Testar avaliar.yml das roles com saídas simuladas
+  hosts: localhost
+  gather_facts: false
+  vars:
+    zabbix_trap_receiver_ip: 192.0.2.10
+    snmpv3_view_name: SNMP-VIEW
+    snmpv3_group_name: MONITORAMENTO
+    snmpv3_user: ZABBIX
+    huawei_snmpv3_auth_mode: sha2-256
+    huawei_snmpv3_priv_mode: aes256
+    cisco_group: |
+      groupname: MONITORAMENTO                    security model:v3 priv
+      readview : SNMP-VIEW                        writeview: <no writeview specified>
+      notifyview: SNMP-VIEW
+      row status: active
+    cisco_user: |
+
+      User name: ZABBIX
+      Engine ID: 800000090300AABBCCDDEEFF
+      storage-type: nonvolatile        active
+      Authentication Protocol: SHA
+      Privacy Protocol: AES128
+      Group-name: MONITORAMENTO
+    cisco_running: |
+      snmp-server view SNMP-VIEW iso included
+      snmp-server enable traps snmp linkdown linkup coldstart warmstart
+      snmp-server enable traps config
+      snmp-server host 192.0.2.10 version 3 priv ZABBIX
+    huawei_cfg: |
+      snmp-agent
+      snmp-agent sys-info version v3
+      snmp-agent mib-view included SNMP-VIEW iso
+      snmp-agent group v3 MONITORAMENTO privacy read-view SNMP-VIEW notify-view SNMP-VIEW
+      snmp-agent usm-user v3 ZABBIX
+      snmp-agent usm-user v3 ZABBIX group MONITORAMENTO
+      snmp-agent usm-user v3 ZABBIX authentication-mode sha2-256 cipher %^%#abc%^%#
+      snmp-agent usm-user v3 ZABBIX privacy-mode aes256 cipher %^%#def%^%#
+      snmp-agent target-host trap address udp-domain 192.0.2.10 params securityname ZABBIX v3 privacy
+      snmp-agent trap enable
+  tasks:
+    - name: Cisco conforme
+      ansible.builtin.include_tasks: ../roles/snmpv3-cisco/tasks/avaliar.yml
+      vars:
+        snmpv3_atual: {stdout: ["{{ cisco_group }}", "{{ cisco_user }}", "{{ cisco_running }}"]}
+    - ansible.builtin.assert: {that: [snmpv3_conforme | bool], fail_msg: "Cisco conforme deu falta: {{ snmpv3_faltando }}"}
+
+    - name: Cisco sem trap e com usuário de outro nome (ZABBIXOLD não conta)
+      ansible.builtin.include_tasks: ../roles/snmpv3-cisco/tasks/avaliar.yml
+      vars:
+        snmpv3_atual:
+          stdout:
+            - "{{ cisco_group }}"
+            - "{{ cisco_user | replace('User name: ZABBIX', 'User name: ZABBIXOLD') }}"
+            - "{{ cisco_running | regex_replace('snmp-server host .*', '') }}"
+    - ansible.builtin.assert:
+        that: ["snmpv3_faltando | sort == ['trap_host', 'usuario_sha_aes128']"]
+        fail_msg: "Esperado trap_host e usuario_sha_aes128, veio {{ snmpv3_faltando }}"
+
+    - name: Cisco vazio
+      ansible.builtin.include_tasks: ../roles/snmpv3-cisco/tasks/avaliar.yml
+      vars:
+        snmpv3_atual: {stdout: ["", "", ""]}
+    - ansible.builtin.assert: {that: ["snmpv3_faltando | length == 8"], fail_msg: "{{ snmpv3_faltando }}"}
+
+    - name: Huawei conforme
+      ansible.builtin.include_tasks: ../roles/snmpv3-huawei/tasks/avaliar.yml
+      vars:
+        snmpv3_atual: {stdout: "{{ huawei_cfg }}"}
+    - ansible.builtin.assert: {that: [snmpv3_conforme | bool], fail_msg: "Huawei conforme deu falta: {{ snmpv3_faltando }}"}
+
+    - name: Huawei só com v2c
+      ansible.builtin.include_tasks: ../roles/snmpv3-huawei/tasks/avaliar.yml
+      vars:
+        snmpv3_atual: {stdout: "snmp-agent\nsnmp-agent sys-info version v2c\nsnmp-agent community read cipher %^%#x%^%#\n"}
+    - ansible.builtin.assert: {that: ["'versao_v3' in snmpv3_faltando", "snmpv3_faltando | length == 9"], fail_msg: "{{ snmpv3_faltando }}"}

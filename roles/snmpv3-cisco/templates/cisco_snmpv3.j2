@@ -1,0 +1,6 @@
+snmp-server view {{ snmpv3_view_name }} iso included
+snmp-server group {{ snmpv3_group_name }} v3 priv read {{ snmpv3_view_name }} notify {{ snmpv3_view_name }}
+snmp-server user {{ snmpv3_user }} {{ snmpv3_group_name }} v3 auth sha {{ snmpv3_auth_password }} priv aes 128 {{ snmpv3_priv_password }}
+snmp-server host {{ zabbix_trap_receiver_ip }} version 3 priv {{ snmpv3_user }}
+snmp-server enable traps snmp linkdown linkup coldstart warmstart
+snmp-server enable traps config

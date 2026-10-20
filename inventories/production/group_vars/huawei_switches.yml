@@ -1,0 +1,10 @@
+---
+ansible_network_os: community.network.ce
+ansible_connection: ansible.netcommon.network_cli
+ansible_network_cli_ssh_type: paramiko
+# Se o login dos Huawei for o mesmo dos Cisco, não precisa criar as chaves vault_huawei_*.
+ansible_user: "{{ vault_huawei_user | default(vault_network_user) }}"
+ansible_password: "{{ vault_huawei_password | default(vault_network_password) }}"
+zabbix_trap_receiver_ip: 192.0.2.10
+snmpv3_group_name: MONITORAMENTO
+snmpv3_user: ZABBIX

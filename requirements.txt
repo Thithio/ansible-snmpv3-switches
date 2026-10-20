@@ -1,0 +1,2 @@
+# Switches antigos só falam algoritmos SSH legados; o paramiko 3.x removeu parte deles.
+paramiko<3.0

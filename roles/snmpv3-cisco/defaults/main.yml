@@ -1,0 +1,6 @@
+---
+snmpv3_view_name: SNMP-VIEW
+snmpv3_group_name: MONITORAMENTO
+snmpv3_user: ZABBIX
+# true: só informa o que falta, sem aplicar nada (bom para a primeira execução).
+snmpv3_somente_verificar: false

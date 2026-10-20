@@ -1,0 +1,4 @@
+.vault_pass
+playbooks/vars/secrets.yml
+playbooks/logs/
+*.retry

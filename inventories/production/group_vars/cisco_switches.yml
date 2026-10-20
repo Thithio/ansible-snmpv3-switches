@@ -1,0 +1,10 @@
+---
+ansible_network_os: cisco.ios.ios
+ansible_connection: ansible.netcommon.network_cli
+# Switches Cisco antigos só negociam algoritmos que a libssh recente recusa.
+ansible_network_cli_ssh_type: paramiko
+ansible_user: "{{ vault_network_user }}"
+ansible_password: "{{ vault_network_password }}"
+zabbix_trap_receiver_ip: 192.0.2.10   # servidor que recebe as traps (snmptrapd do Zabbix)
+snmpv3_group_name: MONITORAMENTO
+snmpv3_user: ZABBIX

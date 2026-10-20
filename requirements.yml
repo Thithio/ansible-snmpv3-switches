@@ -1,0 +1,5 @@
+---
+collections:
+  - name: ansible.netcommon
+  - name: cisco.ios
+  - name: community.network   # plugin de conexão "ce", que entende o prompt do VRP Huawei

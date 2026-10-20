@@ -1,0 +1,145 @@
+---
+# Execução agendada (cron). Para cada IP das faixas de switch:
+#   1. descobre o fabricante pelo banner SSH (switch trocado é pego aqui);
+#   2. confere se SNMPv3 + trap já estão aplicados;
+#   3. se sim, pula; se não, aplica, salva e confere de novo;
+#   4. no fim, imprime um resumo, manda por e-mail e sai com erro se algum switch falhou.
+
+- name: 1/4 Descobrir o fabricante de cada IP pelo banner SSH
+  hosts: switches
+  gather_facts: false
+  tasks:
+    # O wait_for não devolve o texto lido do socket, por isso o banner é lido
+    # com um socket em Python, rodando no próprio control host.
+    # O IP vem de hostvars: com delegate_to, "ansible_host" passa a ser o do
+    # localhost e todos os IPs leriam o SSH do próprio control host.
+    - name: Ler banner SSH (porta 22)
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import socket, sys
+            s = socket.create_connection((sys.argv[1], int(sys.argv[2])), timeout=5)
+            s.settimeout(5)
+            print(s.recv(256).decode(errors="replace").strip())
+          - "{{ hostvars[inventory_hostname]['ansible_host'] | default(inventory_hostname) }}"
+          - "{{ deteccao_porta_ssh | default(22) }}"
+      delegate_to: localhost
+      register: banner_ssh
+      changed_when: false
+      ignore_errors: true   # IP sem equipamento ou sem SSH: vira "sem_ssh" no resumo
+
+    - name: Classificar fabricante
+      ansible.builtin.set_fact:
+        banner_versao: "{{ banner_ssh.stdout | default('') }}"
+        fabricante: >-
+          {%- set versao = banner_ssh.stdout | default('') | regex_replace('^SSH-2\.0-', '') -%}
+          {%- if banner_ssh is failed or not (banner_ssh.stdout | default('')).startswith('SSH-') -%}sem_ssh
+          {%- elif versao is search('cisco', ignorecase=True) -%}cisco
+          {%- elif versao is search('huawei', ignorecase=True) -%}huawei
+          {%- elif versao in ['', '-'] and inventory_hostname in groups['faixa_huawei'] -%}huawei
+          {%- else -%}desconhecido
+          {%- endif -%}
+
+    - name: Separar em grupos por fabricante
+      ansible.builtin.group_by:
+        key: "{{ fabricante }}_switches"
+      changed_when: false
+
+# ignore_unreachable mantém o switch sem acesso no play até o rescue da role,
+# que registra o erro. Sem isso, se todos os switches de um fabricante caíssem,
+# o Ansible encerraria antes do resumo.
+- name: 2/4 Cisco - conferir e aplicar SNMPv3/trap onde faltar
+  hosts: cisco_switches
+  gather_facts: false
+  ignore_unreachable: true
+  vars_files:
+    - vars/secrets.yml
+  roles:
+    - snmpv3-cisco
+
+- name: 3/4 Huawei - conferir e aplicar SNMPv3/trap onde faltar
+  hosts: huawei_switches
+  gather_facts: false
+  ignore_unreachable: true
+  vars_files:
+    - vars/secrets.yml
+  roles:
+    - snmpv3-huawei
+
+- name: 4/4 Resumo da execução (e-mail + log)
+  hosts: localhost
+  gather_facts: false
+  vars:
+    snmpv3_email_para: "noc@example.com"        # vários: separar por vírgula
+    snmpv3_email_de: "ansible@example.com"
+    snmpv3_smtp_host: "smtp.example.com"
+    snmpv3_smtp_port: 25
+  tasks:
+    - name: Montar resumo por situação
+      ansible.builtin.set_fact:
+        resumo: >-
+          {%- set r = {'aplicado': [], 'pendente': [], 'pulado': [], 'falhou': [], 'desconhecido': [], 'sem_ssh': []} -%}
+          {%- for h in groups['switches'] if hostvars[h].fabricante is defined -%}
+            {%- set fab = hostvars[h].fabricante -%}
+            {%- if fab in ['cisco', 'huawei'] -%}
+              {%- set sit = hostvars[h].snmpv3_resultado | default('falhou') -%}
+            {%- else -%}
+              {%- set sit = fab -%}
+            {%- endif -%}
+            {%- if sit in ['aplicado', 'pendente'] -%}
+              {%- set _ = r[sit].append(h ~ ' (' ~ fab ~ ': ' ~ (hostvars[h].snmpv3_faltando_antes | default([]) | join(', ')) ~ ')') -%}
+            {%- elif sit == 'falhou' -%}
+              {%- set _ = r[sit].append(h ~ ' (' ~ fab ~ ': ' ~ (hostvars[h].snmpv3_erro | default('host saiu do play')) ~ ')') -%}
+            {%- elif sit == 'desconhecido' -%}
+              {%- set _ = r[sit].append(h ~ ' (banner: ' ~ (hostvars[h].banner_versao | default('')) ~ ')') -%}
+            {%- else -%}
+              {%- set _ = r[sit].append(h) -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {{ r }}
+
+    - name: Mostrar resumo
+      ansible.builtin.debug:
+        msg:
+          - "Aplicado agora: {{ resumo.aplicado | length }}"
+          - "Falta config, não aplicado (modo só verificar): {{ resumo.pendente | length }}"
+          - "Já conforme (pulado): {{ resumo.pulado | length }}"
+          - "Falhou: {{ resumo.falhou | length }}"
+          - "Fabricante desconhecido: {{ resumo.desconhecido | length }}"
+          - "Sem SSH (IP vazio ou porta 22 fechada): {{ resumo.sem_ssh | length }}"
+          - "Detalhe aplicado: {{ resumo.aplicado }}"
+          - "Detalhe pendente: {{ resumo.pendente }}"
+          - "Detalhe falhou: {{ resumo.falhou }}"
+          - "Detalhe desconhecido: {{ resumo.desconhecido }}"
+
+    - name: Enviar resumo por e-mail
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/files/enviar_resumo_email.py"
+      environment:
+        SNMPV3_RESUMO: "{{ resumo | to_json }}"
+        SNMPV3_EMAIL_PARA: "{{ snmpv3_email_para }}"
+        SNMPV3_EMAIL_DE: "{{ snmpv3_email_de }}"
+        SNMPV3_SMTP_HOST: "{{ snmpv3_smtp_host }}"
+        SNMPV3_SMTP_PORT: "{{ snmpv3_smtp_port }}"
+        SNMPV3_AMBIENTE: "{{ snmpv3_ambiente | default('production') }}"
+        SNMPV3_LOG_FILE: "{{ snmpv3_log_file | default('') }}"
+      register: email_resumo
+      changed_when: false
+      failed_when: false   # falha de SMTP não pode esconder o resumo; vira aviso abaixo
+      when: snmpv3_enviar_email | default(true) | bool
+
+    - name: Avisar se o e-mail não saiu
+      ansible.builtin.debug:
+        msg: "AVISO: e-mail do resumo não foi enviado: {{ email_resumo.stderr | default('') | trim }}"
+      when:
+        - email_resumo is not skipped
+        - email_resumo.rc != 0
+
+    - name: Sair com erro se algum switch falhou (o cron registra no log)
+      ansible.builtin.fail:
+        msg: "{{ resumo.falhou | length }} switch(es) falharam, ver detalhe acima"
+      when: resumo.falhou | length > 0

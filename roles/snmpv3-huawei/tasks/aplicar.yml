@@ -1,0 +1,64 @@
+---
+# Sintaxe VRP V200R010 em diante (S5720/S5735 etc). Versões antigas aceitam a
+# senha na mesma linha e podem precisar de ajuste aqui.
+- name: Entrar em modo de configuração
+  ansible.netcommon.cli_command:
+    command: system-view
+
+- name: Ligar o agente SNMP
+  ansible.netcommon.cli_command:
+    command: snmp-agent
+
+- name: Ligar SNMPv3 (só se estiver desligado; não mexe no v2c)
+  ansible.netcommon.cli_command:
+    command: snmp-agent sys-info version v3
+  when: "'versao_v3' in snmpv3_faltando_antes"
+
+- name: View, grupo, usuário e destino da trap
+  ansible.netcommon.cli_command:
+    command: "{{ item }}"
+  loop:
+    - "snmp-agent mib-view included {{ snmpv3_view_name }} iso"
+    - "snmp-agent group v3 {{ snmpv3_group_name }} privacy read-view {{ snmpv3_view_name }} notify-view {{ snmpv3_view_name }}"
+    - "snmp-agent usm-user v3 {{ snmpv3_user }} group {{ snmpv3_group_name }}"
+    - "snmp-agent target-host trap address udp-domain {{ zabbix_trap_receiver_ip }} params securityname {{ snmpv3_user }} v3 privacy"
+
+- name: Senha de autenticação do usuário (o VRP pede no prompt, duas vezes)
+  ansible.netcommon.cli_command:
+    command: "snmp-agent usm-user v3 {{ snmpv3_user }} authentication-mode {{ huawei_snmpv3_auth_mode }}"
+    prompt:
+      - authentication password
+      - confirm password
+    answer:
+      - "{{ snmpv3_auth_password }}"
+      - "{{ snmpv3_auth_password }}"
+    check_all: true
+  no_log: true
+
+- name: Senha de criptografia do usuário (o VRP pede no prompt, duas vezes)
+  ansible.netcommon.cli_command:
+    command: "snmp-agent usm-user v3 {{ snmpv3_user }} privacy-mode {{ huawei_snmpv3_priv_mode }}"
+    prompt:
+      - privacy password
+      - confirm password
+    answer:
+      - "{{ snmpv3_priv_password }}"
+      - "{{ snmpv3_priv_password }}"
+    check_all: true
+  no_log: true
+
+- name: Habilitar envio de traps (o VRP pede confirmação)
+  ansible.netcommon.cli_command:
+    command: snmp-agent trap enable
+    prompt: '\[Y/N\]'
+    answer: "Y"
+
+- name: Sair do system-view
+  ansible.netcommon.cli_command:
+    command: return
+
+- name: Salvar configuração (sobrevive a reboot)
+  ansible.netcommon.cli_command:
+    command: save
+    prompt: '\[Y/N\]'
+    answer: "Y"

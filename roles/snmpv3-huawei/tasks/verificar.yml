@@ -1,0 +1,15 @@
+---
+- name: Ler config SNMP atual do switch
+  ansible.netcommon.cli_command:
+    command: display current-configuration | include snmp-agent
+  register: snmpv3_atual
+  changed_when: false
+  ignore_errors: true
+
+- name: Falhar com mensagem clara se não conseguiu ler o switch
+  ansible.builtin.fail:
+    msg: "Sem acesso SSH/CLI ao switch: {{ snmpv3_atual.msg | default('sem detalhe') }}"
+  when: snmpv3_atual is unreachable or snmpv3_atual is failed
+
+- name: Comparar com o esperado
+  ansible.builtin.include_tasks: avaliar.yml

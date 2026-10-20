@@ -1,0 +1,38 @@
+---
+# Entrada: snmpv3_atual.stdout = [show snmp group, show snmp user,
+#          show running-config | include snmp-server]
+# Saída:   snmpv3_faltando (lista do que não está no switch) e snmpv3_conforme.
+# O usuário SNMPv3 não aparece no running-config do IOS, por isso ele é
+# conferido no "show snmp user". A senha não dá para conferir: o IOS guarda
+# só a chave derivada.
+- name: Comparar config SNMP do switch com o esperado
+  ansible.builtin.set_fact:
+    snmpv3_faltando: "{{ checagens | dict2items | selectattr('value', 'falsy', convert_bool=True) | map(attribute='key') | list }}"
+  vars:
+    running: "{{ snmpv3_atual.stdout[2] }}"
+    grupo_nosso: >-
+      {{ snmpv3_atual.stdout[0].split('groupname:')
+         | select('search', '^ *' ~ snmpv3_group_name ~ ' +security model:v3 priv') | list }}
+    usuario_nosso: >-
+      {{ snmpv3_atual.stdout[1].split('User name:')
+         | select('match', ' *' ~ snmpv3_user ~ '[ \r]*\n') | list }}
+    checagens:
+      view: "{{ running is search('^snmp-server view ' ~ snmpv3_view_name ~ ' iso included', multiline=True) }}"
+      grupo_v3_priv: "{{ grupo_nosso | length > 0 }}"
+      grupo_read_view: "{{ grupo_nosso | select('search', 'readview *: *' ~ snmpv3_view_name) | list | length > 0 }}"
+      # Alguns IOS trocam a notify view por uma automática (*tv.FFFF...) quando
+      # existe snmp-server host para o usuário; isso também entrega trap.
+      grupo_notify_view: "{{ grupo_nosso | reject('search', 'notifyview: *<no notifyview') | list | length > 0 }}"
+      usuario_sha_aes128: >-
+        {{ usuario_nosso
+           | select('search', 'Authentication Protocol: *SHA')
+           | select('search', 'Privacy Protocol: *AES128')
+           | select('search', 'Group-name: *' ~ snmpv3_group_name)
+           | list | length > 0 }}
+      trap_host: "{{ running is search('^snmp-server host ' ~ (zabbix_trap_receiver_ip | regex_escape) ~ ' version 3 priv ' ~ snmpv3_user, multiline=True) }}"
+      traps_link: "{{ running is search('^snmp-server enable traps snmp .*linkdown', multiline=True) }}"
+      traps_config: "{{ running is search('^snmp-server enable traps config *$', multiline=True) }}"
+
+- name: Marcar se o switch já está conforme
+  ansible.builtin.set_fact:
+    snmpv3_conforme: "{{ snmpv3_faltando | length == 0 }}"

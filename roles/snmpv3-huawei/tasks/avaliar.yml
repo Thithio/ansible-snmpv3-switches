@@ -1,0 +1,28 @@
+---
+# Entrada: snmpv3_atual.stdout = "display current-configuration | include snmp-agent"
+# Saída:   snmpv3_faltando e snmpv3_conforme (mesmo contrato da role Cisco).
+# O VRP mostra senha e às vezes o securityname como "cipher %^%#...%^%#",
+# então essas partes não são comparadas; só nomes, modos e o IP do destino.
+- name: Comparar config SNMP do switch com o esperado
+  ansible.builtin.set_fact:
+    snmpv3_faltando: "{{ checagens | dict2items | selectattr('value', 'falsy', convert_bool=True) | map(attribute='key') | list }}"
+  vars:
+    cfg: "{{ snmpv3_atual.stdout }}"
+    usuario: "^ *snmp-agent usm-user v3 {{ snmpv3_user }} "
+    checagens:
+      # Sem a linha sys-info version vale o padrão do VRP (v3 ligado).
+      versao_v3: >-
+        {{ cfg is not search('^ *snmp-agent sys-info version', multiline=True)
+           or cfg is search('^ *snmp-agent sys-info version .*(v3|all)', multiline=True) }}
+      view: "{{ cfg is search('^ *snmp-agent mib-view included ' ~ snmpv3_view_name ~ ' iso', multiline=True) }}"
+      grupo_read_view: "{{ cfg is search('^ *snmp-agent group v3 ' ~ snmpv3_group_name ~ ' privacy .*read-view ' ~ snmpv3_view_name, multiline=True) }}"
+      grupo_notify_view: "{{ cfg is search('^ *snmp-agent group v3 ' ~ snmpv3_group_name ~ ' privacy .*notify-view ' ~ snmpv3_view_name, multiline=True) }}"
+      usuario_no_grupo: "{{ cfg is search(usuario ~ '(group )?' ~ snmpv3_group_name ~ '( |$)', multiline=True) }}"
+      usuario_auth: "{{ cfg is search(usuario ~ '.*authentication-mode ' ~ huawei_snmpv3_auth_mode ~ '( |$)', multiline=True) }}"
+      usuario_priv: "{{ cfg is search(usuario ~ '.*privacy-mode ' ~ huawei_snmpv3_priv_mode ~ '( |$)', multiline=True) }}"
+      trap_host: "{{ cfg is search('^ *snmp-agent target-host trap address udp-domain ' ~ (zabbix_trap_receiver_ip | regex_escape) ~ ' .*v3 privacy', multiline=True) }}"
+      trap_enable: "{{ cfg is search('^ *snmp-agent trap enable *$', multiline=True) }}"
+
+- name: Marcar se o switch já está conforme
+  ansible.builtin.set_fact:
+    snmpv3_conforme: "{{ snmpv3_faltando | length == 0 }}"
