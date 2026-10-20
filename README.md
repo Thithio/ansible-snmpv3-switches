@@ -1,5 +1,7 @@
 # ansible-snmpv3-switches
 
+[![CI](https://github.com/Thithio/ansible-snmpv3-switches/actions/workflows/ci.yml/badge.svg)](https://github.com/Thithio/ansible-snmpv3-switches/actions/workflows/ci.yml) ![Licença MIT](https://img.shields.io/badge/licen%C3%A7a-MIT-blue)
+
 Automação Ansible que mantém SNMPv3 (`authPriv`) e SNMP trap configurados em switches Cisco e Huawei. Roda agendada: a cada execução, confere cada switch, pula o que já está certo e corrige só o que falta.
 
 Feita para um problema comum em rede de campus: switch trocado chega sem a config de monitoramento e ninguém avisa o time que cuida do Zabbix.
